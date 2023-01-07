@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bitint_macro = { path = "bitint_macro" }
+paste = "1.0.11"
 
 [workspace]
 members = ["bitint_macro"]
