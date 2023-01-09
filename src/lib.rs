@@ -25,7 +25,7 @@ macro_rules! define_multiple_uints {
     };
 }
 
-define_multiple_uints!(24 /*,48, 80, 256, 512, 1024, 2048, 4096*/);
+define_multiple_uints!(24, 48, 80, 256, 512, 1024, 2048, 4096);
 
 #[cfg(test)]
 mod tests {
