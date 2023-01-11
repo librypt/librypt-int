@@ -66,8 +66,6 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
         }
     }
 
-    chunks.reverse();
-
     let input = ItemStruct {
         fields: Fields::Unnamed(FieldsUnnamed {
             paren_token: Paren {
@@ -83,7 +81,6 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
     let idxs: Vec<_> = chunks
         .iter()
         .enumerate()
-        .rev()
         .map(|(idx, _)| {
             Member::Unnamed(Index {
                 index: idx as u32,
@@ -97,11 +94,7 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
         .map(|x| Ident::new(format!("u{}", x).to_string().as_str(), Span::call_site()))
         .collect();
 
-    let last_member = Member::Unnamed(Index {
-        index: chunks.len() as u32 - 1,
-        span: Span::call_site(),
-    });
-    let last_member_type = types.first().unwrap().clone();
+    let first_member_type = types.first().unwrap().clone();
 
     let add_quote = quote! {
         let mut ret = #name::MIN;
@@ -117,7 +110,7 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
 
         if carry || other_carry {
             ret = #name::MIN;
-            ret.#last_member = carry as #last_member_type + other_carry as #last_member_type;
+            ret.0 = carry as #first_member_type + other_carry as #first_member_type;
         }
 
         (ret, carry || other_carry)
@@ -137,20 +130,113 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
 
         if carry || other_carry {
             ret = #name::MAX;
-            ret.#last_member -= carry as #last_member_type + other_carry as #last_member_type;
+            ret.0 -= carry as #first_member_type + other_carry as #first_member_type;
         }
 
         (ret, carry || other_carry)
     };
 
-    let deftypes: Vec<_> = types.iter().rev().collect();
+    let from_quote = {
+        let mut quote = quote! {};
+        let mut bytes = bits / 8;
+        let mut offset = 0usize;
+        let mut idx = 0;
+
+        while bytes != 0 {
+            let max_chunk = if bytes >= 16 {
+                16
+            } else if bytes >= 8 {
+                8
+            } else if bytes >= 4 {
+                4
+            } else if bytes >= 2 {
+                2
+            } else {
+                1
+            };
+
+            let member = Member::Unnamed(Index {
+                index: idx as u32,
+                span: Span::call_site(),
+            });
+            let typ = types[idx].clone();
+
+            let slice_end = offset + max_chunk as usize;
+
+            quote = quote! {
+                #quote
+
+                ret.#member = #typ::from_le_bytes(bytes[#offset..#slice_end].try_into().unwrap());
+            };
+
+            idx += 1;
+            offset += max_chunk as usize;
+            bytes -= max_chunk;
+        }
+
+        quote! {
+            let mut ret = #name::MIN;
+            let bytes = (value as u128).to_le_bytes();
+
+            #quote
+
+            ret
+        }
+    };
+
+    let into_quote = {
+        let mut quote = quote! {};
+        let mut bytes = bits / 8;
+        let mut max_bytes = 16;
+        let mut offset = 0usize;
+        let mut idx = 0;
+
+        while bytes != 0 && max_bytes != 0 {
+            let max_chunk = if bytes >= 16 {
+                16
+            } else if bytes >= 8 {
+                8
+            } else if bytes >= 4 {
+                4
+            } else if bytes >= 2 {
+                2
+            } else {
+                1
+            };
+
+            let member = Member::Unnamed(Index {
+                index: idx as u32,
+                span: Span::call_site(),
+            });
+            let slice_end = offset + max_chunk as usize;
+
+            quote = quote! {
+                #quote
+
+                bytes[#offset..#slice_end].copy_from_slice(&value.#member.to_le_bytes());
+            };
+
+            idx += 1;
+            offset += max_chunk as usize;
+            bytes -= max_chunk;
+            max_bytes -= max_chunk;
+        }
+
+        quote! {
+            let mut bytes = [0u8; 16];
+
+            #quote
+
+            u128::from_le_bytes(bytes)
+        }
+    };
 
     quote! {
         #input
 
         impl #name {
-            const MIN: #name = #name(#(#deftypes::MIN),*);
-            const MAX: #name = #name(#(#deftypes::MAX),*);
+            const MIN: #name = #name(#(#types::MIN),*);
+            const MAX: #name = #name(#(#types::MAX),*);
             const BITS: u32 = #bits;
 
             pub const fn overflowing_add(self, rhs: #name) -> (#name, bool) {
@@ -282,45 +368,35 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
         impl From<u8> for #name {
             #[inline]
             fn from(value: u8) -> #name {
-                let mut ret = #name::MIN;
-                ret.#last_member = value as #last_member_type;
-                ret
+                #from_quote
             }
         }
 
         impl From<u16> for #name {
             #[inline]
             fn from(value: u16) -> #name {
-                let mut ret = #name::MIN;
-                ret.#last_member = value as #last_member_type;
-                ret
+                #from_quote
             }
         }
 
         impl From<u32> for #name {
             #[inline]
             fn from(value: u32) -> #name {
-                let mut ret = #name::MIN;
-                ret.#last_member = value as #last_member_type;
-                ret
+                #from_quote
             }
         }
 
         impl From<u64> for #name {
             #[inline]
             fn from(value: u64) -> #name {
-                let mut ret = #name::MIN;
-                ret.#last_member = value as #last_member_type;
-                ret
+                #from_quote
             }
         }
 
         impl From<u128> for #name {
             #[inline]
             fn from(value: u128) -> #name {
-                let mut ret = #name::MIN;
-                ret.#last_member = value as #last_member_type;
-                ret
+                #from_quote
             }
         }
 
@@ -362,35 +438,35 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
         impl From<#name> for u8 {
             #[inline]
             fn from(value: #name) -> u8 {
-                value.#last_member as u8
+                #into_quote as u8
             }
         }
 
         impl From<#name> for u16 {
             #[inline]
             fn from(value: #name) -> u16 {
-                value.#last_member as u16
+                #into_quote as u16
             }
         }
 
         impl From<#name> for u32 {
             #[inline]
             fn from(value: #name) -> u32 {
-                value.#last_member as u32
+                #into_quote as u32
             }
         }
 
         impl From<#name> for u64 {
             #[inline]
             fn from(value: #name) -> u64 {
-                value.#last_member as u64
+                #into_quote as u64
             }
         }
 
         impl From<#name> for u128 {
             #[inline]
             fn from(value: #name) -> u128 {
-                value.#last_member as u128
+                #into_quote
             }
         }
 
