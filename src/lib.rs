@@ -11,7 +11,7 @@ macro_rules! define_multiple_uints {
             #[allow(non_camel_case_types)]
             #[bituint($x)]
             #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-            struct [<u $x>];
+            pub struct [<u $x>];
         }
     };
 
@@ -20,7 +20,7 @@ macro_rules! define_multiple_uints {
             #[allow(non_camel_case_types)]
             #[bituint($x)]
             #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-            struct [<u $x>];
+            pub struct [<u $x>];
         }
 
         define_multiple_uints!($($xs),*);
