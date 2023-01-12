@@ -136,6 +136,16 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
         (ret, carry || other_carry)
     };
 
+    let div_mod_quote = quote! {
+        let mut ret = #name::MIN;
+        let mut rem = self;
+
+        while rem >= rhs {
+            rem -= rhs;
+            ret += #name::from(1);
+        }
+    };
+
     let from_quote = {
         let mut quote = quote! {};
         let mut bytes = bits / 8;
@@ -240,11 +250,38 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
             const BITS: u32 = #bits;
 
             pub const fn overflowing_add(self, rhs: #name) -> (#name, bool) {
-               #add_quote
+                #add_quote
             }
 
             pub const fn overflowing_sub(self, rhs: #name) -> (#name, bool) {
                 #sub_quote
+            }
+
+            pub fn overflowing_mul(self, rhs: #name) -> (#name, bool) {
+                let mut carry_ret = false;
+                let mut ret = #name::MIN;
+                let mut rhs = rhs;
+
+                while rhs != #name::MIN {
+                    let (res, carry) = ret.overflowing_add(self);
+                    ret += res;
+                    carry_ret = carry_ret || carry;
+                    rhs -= #name::from(1);
+                }
+
+                (ret, carry_ret)
+            }
+
+            pub fn overflowing_div(self, rhs: #name) -> (#name, bool) {
+                #div_mod_quote
+
+                (ret, false)
+            }
+
+            pub fn overflowing_rem(self, rhs: #name) -> (#name, bool) {
+                #div_mod_quote
+
+                (rem, false)
             }
         }
 
@@ -288,6 +325,58 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
             }
         }
 
+        impl std::ops::Mul for #name {
+            type Output = #name;
+
+            #[inline]
+            fn mul(self, other: #name) -> #name {
+                let (ret, carry) = self.overflowing_mul(other);
+
+                debug_assert!(!carry, "attempt to multiply with overflow");
+
+                ret
+            }
+        }
+
+        impl std::ops::MulAssign for #name {
+            #[inline]
+            fn mul_assign(&mut self, other: #name) {
+                *self = *self * other;
+            }
+        }
+
+        impl std::ops::Div for #name {
+            type Output = #name;
+
+            #[inline]
+            fn div(self, other: #name) -> #name {
+                self.overflowing_div(other).0
+            }
+        }
+
+        impl std::ops::DivAssign for #name {
+            #[inline]
+            fn div_assign(&mut self, other: #name) {
+                *self = *self / other;
+            }
+        }
+
+        impl std::ops::Rem for #name {
+            type Output = #name;
+
+            #[inline]
+            fn rem(self, other: #name) -> #name {
+                self.overflowing_rem(other).0
+            }
+        }
+
+        impl std::ops::RemAssign for #name {
+            #[inline]
+            fn rem_assign(&mut self, other: #name) {
+                *self = *self % other;
+            }
+        }
+
         impl std::ops::Add<&#name> for &#name {
             type Output = #name;
 
@@ -307,6 +396,32 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
             }
         }
 
+        impl std::ops::Mul<&#name> for &#name {
+            type Output = #name;
+
+            #[inline]
+            fn mul(self, other: &#name) -> #name {
+                *self * *other
+            }
+        }
+
+        impl std::ops::Div<&#name> for &#name {
+            type Output = #name;
+
+            #[inline]
+            fn div(self, other: &#name) -> #name {
+                *self / *other
+            }
+        }
+
+        impl std::ops::Rem<&#name> for &#name {
+            type Output = #name;
+
+            #[inline]
+            fn rem(self, other: &#name) -> #name {
+                *self % *other
+            }
+        }
 
         impl std::ops::Add<&#name> for #name {
             type Output = #name;
@@ -340,6 +455,54 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
             }
         }
 
+        impl std::ops::Mul<&#name> for #name {
+            type Output = #name;
+
+            #[inline]
+            fn mul(self, other: &#name) -> #name {
+                self * *other
+            }
+        }
+
+        impl std::ops::MulAssign<&#name> for #name {
+            #[inline]
+            fn mul_assign(&mut self, other: &#name) {
+                *self = *self * other;
+            }
+        }
+
+        impl std::ops::Div<&#name> for #name {
+            type Output = #name;
+
+            #[inline]
+            fn div(self, other: &#name) -> #name {
+                self / *other
+            }
+        }
+
+        impl std::ops::DivAssign<&#name> for #name {
+            #[inline]
+            fn div_assign(&mut self, other: &#name) {
+                *self = *self / other;
+            }
+        }
+
+        impl std::ops::Rem<&#name> for #name {
+            type Output = #name;
+
+            #[inline]
+            fn rem(self, other: &#name) -> #name {
+                self % *other
+            }
+        }
+
+        impl std::ops::RemAssign<&#name> for #name {
+            #[inline]
+            fn rem_assign(&mut self, other: &#name) {
+                *self = *self % other;
+            }
+        }
+
         impl<'a> std::ops::Add<#name> for &'a #name {
             type Output = #name;
 
@@ -355,6 +518,33 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
             #[inline]
             fn sub(self, other: #name) -> #name {
                 *self - other
+            }
+        }
+
+        impl<'a> std::ops::Mul<#name> for &'a #name {
+            type Output = #name;
+
+            #[inline]
+            fn mul(self, other: #name) -> #name {
+                *self * other
+            }
+        }
+
+        impl<'a> std::ops::Div<#name> for &'a #name {
+            type Output = #name;
+
+            #[inline]
+            fn div(self, other: #name) -> #name {
+                *self / other
+            }
+        }
+
+        impl<'a> std::ops::Rem<#name> for &'a #name {
+            type Output = #name;
+
+            #[inline]
+            fn rem(self, other: #name) -> #name {
+                *self % other
             }
         }
 
