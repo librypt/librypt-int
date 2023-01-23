@@ -148,7 +148,7 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
 
     let from_quote = {
         let mut quote = quote! {};
-        let mut bytes = bits / 8;
+        let mut bytes = (bits / 8).max(16);
         let mut offset = 0usize;
         let mut idx = 0;
 
@@ -187,6 +187,53 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
         quote! {
             let mut ret = #name::MIN;
             let bytes = (value as u128).to_le_bytes();
+
+            #quote
+
+            ret
+        }
+    };
+
+    let from_bytes_quote = {
+        let mut quote = quote! {};
+        let mut bytes = bits / 8;
+        let mut offset = 0usize;
+        let mut idx = 0;
+
+        while bytes != 0 {
+            let max_chunk = if bytes >= 16 {
+                16
+            } else if bytes >= 8 {
+                8
+            } else if bytes >= 4 {
+                4
+            } else if bytes >= 2 {
+                2
+            } else {
+                1
+            };
+
+            let member = Member::Unnamed(Index {
+                index: idx as u32,
+                span: Span::call_site(),
+            });
+            let typ = types[idx].clone();
+
+            let slice_end = offset + max_chunk as usize;
+
+            quote = quote! {
+                #quote
+
+                ret.#member = #typ::from_le_bytes(bytes[#offset..#slice_end].try_into().unwrap());
+            };
+
+            idx += 1;
+            offset += max_chunk as usize;
+            bytes -= max_chunk;
+        }
+
+        quote! {
+            let mut ret = #name::MIN;
 
             #quote
 
@@ -241,6 +288,55 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
         }
     };
 
+    let into_bytes_quote = {
+        let mut quote = quote! {};
+        let mut bytes = bits as usize / 8;
+        let mut offset = 0usize;
+        let mut idx = 0;
+
+        while bytes != 0 {
+            let max_chunk = if bytes >= 16 {
+                16
+            } else if bytes >= 8 {
+                8
+            } else if bytes >= 4 {
+                4
+            } else if bytes >= 2 {
+                2
+            } else {
+                1
+            };
+
+            let member = Member::Unnamed(Index {
+                index: idx as u32,
+                span: Span::call_site(),
+            });
+            let slice_end = offset + max_chunk as usize;
+
+            quote = quote! {
+                #quote
+
+                bytes[#offset..#slice_end].copy_from_slice(&self.#member.to_le_bytes());
+            };
+
+            idx += 1;
+            offset += max_chunk as usize;
+            bytes -= max_chunk;
+        }
+
+        let bytes = bits as usize / 8;
+
+        quote! {
+            let mut bytes = [0u8; #bytes];
+
+            #quote
+
+            bytes
+        }
+    };
+
+    let byte_count = bits as usize / 8;
+
     quote! {
         #input
 
@@ -282,6 +378,46 @@ pub fn bituint(arg: TokenStream, input: TokenStream) -> TokenStream {
                 #div_mod_quote
 
                 (rem, false)
+            }
+
+            pub fn from_le_bytes(bytes: [u8; #byte_count]) -> #name {
+                #from_bytes_quote
+            }
+
+            #[inline]
+            pub fn from_be_bytes(bytes: [u8; #byte_count]) -> #name {
+                let mut bytes = bytes;
+                bytes.reverse();
+                #name::from_le_bytes(bytes)
+            }
+
+            #[inline]
+            pub fn from_ne_bytes(bytes: [u8; #byte_count]) -> #name {
+                if cfg!(target_endian = "little") {
+                    #name::from_le_bytes(bytes)
+                } else {
+                    #name::from_be_bytes(bytes)
+                }
+            }
+
+            pub fn to_le_bytes(self) -> [u8; #byte_count] {
+                #into_bytes_quote
+            }
+
+            #[inline]
+            pub fn to_be_bytes(self) -> [u8; #byte_count] {
+                let mut ret = self.to_le_bytes();
+                ret.reverse();
+                ret
+            }
+
+            #[inline]
+            pub fn to_ne_bytes(self) -> [u8; #byte_count] {
+                if cfg!(target_endian = "little") {
+                    self.to_le_bytes()
+                } else {
+                    self.to_be_bytes()
+                }
             }
         }
 
